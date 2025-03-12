@@ -10,7 +10,6 @@ class SummaryType(IntFlag):
     BY_TEACHER = 1
     BY_YEAR = 2
     BY_COURSE = 4
-    BY_SUBJECT = 8
 
 class Summary:
     # Ключ - значения группировки, например "Седашов 2024-2025 НИС"
@@ -48,8 +47,6 @@ class Summary:
             key_template += "{year}"
         if SummaryType.BY_COURSE in self.summary_type:
             key_template += "{course}"
-        if SummaryType.BY_SUBJECT in self.summary_type:
-            key_template += "{subject}"
 
         key_template = key_template.strip()
 
