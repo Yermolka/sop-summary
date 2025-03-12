@@ -1,4 +1,3 @@
-from random import randint
 import pandas as pd
 from enum import IntFlag
 from asyncio import run, gather
@@ -23,7 +22,6 @@ class Summary:
 
     def __init__(self, filename: str, summary_type: SummaryType, workers: int, output: str):
         self.df = pd.read_csv(filename)
-        self.df["text"] = self.df["text"].apply(lambda x: str(x))
         self.df["summary"] = None
 
         self.summary_type = summary_type
@@ -39,23 +37,25 @@ class Summary:
         run(self._summarize())
 
     def _prepare_data(self) -> None:
-        key_template = ""
+        for idx, row in self.df.iterrows():
+            if idx >= 10_000:
+                break
 
-        if SummaryType.BY_TEACHER in self.summary_type:
-            key_template += "{teacher}"
-        if SummaryType.BY_YEAR in self.summary_type:
-            key_template += "{year}"
-        if SummaryType.BY_COURSE in self.summary_type:
-            key_template += "{course}"
+            program = str(row["ОП"]) or ""
+            teacher = str(row["ФИО преподавателя"]) or ""
+            year = str(row["Семестр"].split()[0]) or ""
+            course = str(row["Дисциплина"]) or ""
 
-        key_template = key_template.strip()
+            key = program + " "
+            if SummaryType.BY_TEACHER in self.summary_type:
+                key += teacher + " "
+            if SummaryType.BY_YEAR in self.summary_type:
+                key += year + " "
+            if SummaryType.BY_COURSE in self.summary_type:
+                key += course + " "
 
-        for _, row in self.df.iterrows():
-            # ключ достаем из значений строк
-            # TODO: доп ключи для оценок предмета в целом
-            # key = key_template.format(**row)
-            key = randint(0, 5)
-            self.data.setdefault(key, []).append(row["text"])
+            text_key = "text_without_stopwords"
+            self.data.setdefault(key, []).append(str(row[text_key]))
 
         self.data_keys = list(self.data.keys())
 
@@ -65,7 +65,6 @@ class Summary:
             for key, summary in result.items():
                 self.results[key] = summary
 
-        print(self.results)
         self._save_results()
     
     async def _worker_thread(self, idx: int) -> dict[str, str]:
@@ -79,7 +78,7 @@ class Summary:
         results = {}
 
         for key in keys:
-            results[key] = "SUMMARY " + self._ai_magic(self.data[key])
+            results[key] = self._ai_magic(self.data[key])
 
         return results
 
