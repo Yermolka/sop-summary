@@ -1,7 +1,10 @@
+from transformers import AutoTokenizer, T5ForConditionalGeneration
+import torch
 import pandas as pd
 from enum import IntFlag
-from asyncio import run, gather
+from tqdm import tqdm
 
+torch.cuda.is_available()
 
 # Флаги, работают вместе через побитовое ИЛИ
 # Например, по преподавателям и по годам - 3 (BY_TEACHER | BY_YEAR)
@@ -20,6 +23,12 @@ class Summary:
 
     results: dict[str, str] = {}
 
+    model_name = "IlyaGusev/rut5_base_sum_gazeta"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = T5ForConditionalGeneration.from_pretrained(model_name)
+
+    LIMIT_LINES_TEST = 200
+
     def __init__(self, filename: str, summary_type: SummaryType, workers: int, output: str):
         self.df = pd.read_csv(filename)
         self.df["summary"] = None
@@ -28,17 +37,23 @@ class Summary:
         self.workers = workers
         self.output = output
 
+        if not torch.cuda.is_available():
+            print("CUDA is not available, using CPU")
+        else:
+            print(torch.cuda.get_device_name(0))
+
     def summarize(self) -> str:
         print(f"\n{'='*80}")
         print("Running summarize...")
         print(f"{'='*80}\n")
 
         self._prepare_data()
-        run(self._summarize())
+        self._summarize()
+        self._save_results()
 
     def _prepare_data(self) -> None:
         for idx, row in self.df.iterrows():
-            if idx >= 10_000:
+            if idx >= self.LIMIT_LINES_TEST:
                 break
 
             program = str(row["ОП"]) or ""
@@ -54,39 +69,37 @@ class Summary:
             if SummaryType.BY_COURSE in self.summary_type:
                 key += course + " "
 
-            text_key = "text_without_stopwords"
+            text_key = "text"
             self.data.setdefault(key, []).append(str(row[text_key]))
 
         self.data_keys = list(self.data.keys())
 
-    async def _summarize(self) -> str:
-        results = await gather(*[self._worker_thread(i) for i in range(self.workers)])
-        for result in results:
-            for key, summary in result.items():
-                self.results[key] = summary
-
-        self._save_results()
-    
-    async def _worker_thread(self, idx: int) -> dict[str, str]:
-        keys_per_worker = len(self.data) // self.workers
-        keys_per_worker += 1 if len(self.data) % self.workers != 0 else 0
-
-        start = idx * keys_per_worker
-        end = start + keys_per_worker
-        keys = self.data_keys[start:end]
-
-        results = {}
-
-        for key in keys:
-            results[key] = self._ai_magic(self.data[key])
-
-        return results
+    def _summarize(self) -> str:
+        for key in tqdm(self.data_keys):
+            self.results[key] = self._ai_magic(self.data[key])
 
     def _ai_magic(self, texts: list[str]) -> str:
-        return "".join(texts)
+        article_text = "".join(texts)
+        input_ids = self.tokenizer(
+            [article_text],
+            max_length=600,
+            add_special_tokens=True,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        )["input_ids"]
+
+        output_ids = self.model.generate(
+            input_ids=input_ids,
+            no_repeat_ngram_size=4
+        )[0]
+
+        summary = self.tokenizer.decode(output_ids, skip_special_tokens=True)
+        return summary
+
 
     def _save_results(self) -> None:
         ordered_result_keys = list(sorted(self.results.keys()))
 
-        results = pd.DataFrame([[key, self.results[key]] for key in ordered_result_keys], columns=["key", "summary"])
+        results = pd.DataFrame([[key, self.results[key], len(self.data[key])] for key in ordered_result_keys], columns=["key", "summary", "based_on_len"])
         results.to_csv(self.output, index=False)
