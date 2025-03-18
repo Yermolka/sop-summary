@@ -1,3 +1,4 @@
+accelerate==1.5.2
 autocorrect==2.6.1
 certifi==2025.1.31
 charset-normalizer==3.4.1
@@ -29,6 +30,7 @@ nvidia-nvjitlink-cu12==12.4.127
 nvidia-nvtx-cu12==12.4.127
 packaging==24.2
 pandas==2.2.3
+psutil==7.0.0
 pymorphy3==2.0.3
 pymorphy3-dicts-ru==2.4.417150.4580142
 pyspellchecker==0.8.2

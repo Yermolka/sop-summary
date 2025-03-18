@@ -16,16 +16,16 @@ class SummaryType(IntFlag):
 class Summary:
     # Ключ - значения группировки, например "Седашов 2024-2025 НИС"
     # Значение - список строк из СОПа, например ["лучший", "Z", "V"]
-    data: dict[str, list[str]] = {}
+    data: dict[tuple, list[str]] = {}
     
     # для поддержания порядка ключей
-    data_keys: list[str] = []
+    data_keys: list[tuple] = []
 
-    results: dict[str, str] = {}
+    results: dict[tuple, str] = {}
 
     model_name = "IlyaGusev/rut5_base_sum_gazeta"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = T5ForConditionalGeneration.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+    model = T5ForConditionalGeneration.from_pretrained(model_name, device_map="cuda:0")
 
     LIMIT_LINES_TEST = 200
 
@@ -37,10 +37,11 @@ class Summary:
         self.workers = workers
         self.output = output
 
-        if not torch.cuda.is_available():
-            print("CUDA is not available, using CPU")
-        else:
+        if torch.cuda.is_available():
             print(torch.cuda.get_device_name(0))
+            self.model = self.model.to("cuda:0")
+        else:
+            print("Using CPU")
 
     def summarize(self) -> str:
         print(f"\n{'='*80}")
@@ -57,20 +58,20 @@ class Summary:
                 break
 
             program = str(row["ОП"]) or ""
-            teacher = str(row["ФИО преподавателя"]) or ""
-            year = str(row["Семестр"].split()[0]) or ""
-            course = str(row["Дисциплина"]) or ""
+            teacher = str(row["ФИО преподавателя"] or "")
+            year = str(row["Семестр"].split()[0] or "")
+            course = str(row["Дисциплина"] or "")
 
-            key = program + " "
+            keys = [program]
             if SummaryType.BY_TEACHER in self.summary_type:
-                key += teacher + " "
+                keys.append(teacher)
             if SummaryType.BY_YEAR in self.summary_type:
-                key += year + " "
+                keys.append(year)
             if SummaryType.BY_COURSE in self.summary_type:
-                key += course + " "
+                keys.append(course)
 
             text_key = "text"
-            self.data.setdefault(key, []).append(str(row[text_key]))
+            self.data.setdefault(tuple(keys), []).append(str(row[text_key]))
 
         self.data_keys = list(self.data.keys())
 
@@ -89,6 +90,9 @@ class Summary:
             return_tensors="pt"
         )["input_ids"]
 
+        if torch.cuda.is_available():
+            input_ids = input_ids.to("cuda:0")
+
         output_ids = self.model.generate(
             input_ids=input_ids,
             no_repeat_ngram_size=4
@@ -101,5 +105,13 @@ class Summary:
     def _save_results(self) -> None:
         ordered_result_keys = list(sorted(self.results.keys()))
 
-        results = pd.DataFrame([[key, self.results[key], len(self.data[key])] for key in ordered_result_keys], columns=["key", "summary", "based_on_len"])
+        keys = ["program"]
+        if SummaryType.BY_TEACHER in self.summary_type:
+            keys.append("teacher")
+        if SummaryType.BY_YEAR in self.summary_type:
+            keys.append("year")
+        if SummaryType.BY_COURSE in self.summary_type:
+            keys.append("course")
+
+        results = pd.DataFrame([[*result_key, self.results[result_key], len(self.data[result_key])] for result_key in ordered_result_keys], columns=[*keys, "summary", "based_on_len"])
         results.to_csv(self.output, index=False)
