@@ -2,6 +2,7 @@ from typing import Literal
 from summary import Summary, SummaryType
 from tone_analysis import ToneAnalysis
 from preprocess import Preprocess
+from emotions import EmotionAnalysis
 from time import sleep
 
 if __name__ == "__main__":
@@ -13,7 +14,7 @@ if __name__ == "__main__":
 
 
     # Общие настройки
-    task: Literal["preprocess", "summary", "tone_analysis"] = "preprocess"
+    task: Literal["preprocess", "summary", "tone_analysis", "emotional_analysis"] = "preprocess"
     print("Task: ", task)
     sleep(2)
 
@@ -26,6 +27,11 @@ if __name__ == "__main__":
     group_by_teacher: bool = True
     group_by_year: bool = False
     group_by_course: bool = False
+
+    # Настройки для tone_analysis
+    # Если не указать, то будет произведен только общий анализ
+    # Если указать - только по конкретному преподавателю
+    teacher_name: str | None = None
 
     match task:
         case "preprocess":
@@ -50,5 +56,8 @@ if __name__ == "__main__":
             summary = Summary("preprocessed.csv", summary_type, model_idx)
             summary.summarize()
         case "tone_analysis":
-            tone_analysis = ToneAnalysis("preprocessed.csv")
+            tone_analysis = ToneAnalysis("preprocessed.csv", teacher_name)
             tone_analysis.tone_analysis()
+        case "emotional_analysis":
+            emotional_analysis = EmotionAnalysis("data_with_sentiment.csv")
+            emotional_analysis.analyze()

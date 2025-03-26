@@ -37,9 +37,7 @@ class Summary:
     LIMIT_LINES_TEST = 1_000
     CHUNK_SIZE = 512
 
-    def __init__(
-        self, filename: str, summary_type: SummaryType, model_idx: int
-    ):
+    def __init__(self, filename: str, summary_type: SummaryType, model_idx: int):
         self.df = pd.read_csv(filename)
         self.df["summary"] = None
 

@@ -6,6 +6,8 @@ from nltk.corpus import stopwords
 from spellchecker import SpellChecker
 from transformers import AutoModelForSeq2SeqLM, T5TokenizerFast
 import torch
+from joblib import Parallel, delayed
+import multiprocessing
 
 nltk.download("stopwords")
 
@@ -14,6 +16,7 @@ class Preprocess:
     """
     Класс для предобработки данных. Для запуска требуется только путь к файлу с данными.
     """
+
     spell = SpellChecker(language="ru")
     morph = pymorphy3.MorphAnalyzer()
 
@@ -35,49 +38,40 @@ class Preprocess:
             self.device = torch.device("cpu")
 
     def preprocess(self):
-        self.data["text"] = self.data["Комментарий студента"].apply(self.text_preprocess)
-        self.data["lemmatized_text"] = self.data["text"].apply(self.lemmatize)
-        self.data["lemmatized_text_without_stopwords"] = self.data["lemmatized_text"].apply(self.remove_stopwords)
-        self.data["text_without_stopwords"] = self.data["text"].apply(self.remove_stopwords)
+        self.text_preprocess()
+        self.lemmatize()
+        self.remove_stopwords()
 
         self.data.to_excel("preprocessed.xlsx", index=False)
         self.data.to_csv("preprocessed.csv", index=False)
 
         # Применяем модель на небольшой выборке
         data1 = self.data.sample(n=100).copy()
-        data1["Исправленный комментарий"] = data1["Комментарий студента"].apply(self.spell_ai)
+        data1["Исправленный комментарий"] = data1["Комментарий студента"].apply(
+            self.spell_ai
+        )
 
         data1.to_excel("preprocessed_part_corrected.xlsx", index=False)
         data1.to_csv("preprocessed_part_corrected.csv", index=False)
 
-    def text_to_lower(self, text: str) -> str:
-        """
-        Принимает на вход текст, возвращает текст в нижнем регистре.
-        """
-        return text.lower()
-
-    def remove_punctuation(self, text: str) -> str:
-        """
-        Принимает на вход текст, вовзращает текст, в котором символы перехода на
-        новую строку, символы табуляции и знаки препинания заменены на пробелы.
-        """
-        cleaned_text = text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
-        return re.sub(r"[^\w\s]", " ", cleaned_text)
-
-    def remove_extra_spaces(self, text: str) -> str:
-        """
-        Принимает на вход текст, возвращает его без лишних пробелов.
-        """
-        return re.sub(r"\s+", " ", text).strip()
-
-    def text_preprocess(self, text: str) -> str:
+    def text_preprocess(self) -> str:
         """
         Принимает на вход текст, возвращает текст в нижнем регистре без знаков
         препинания и без лишних пробелов.
         """
-        return self.remove_extra_spaces(
-            self.remove_punctuation(self.text_to_lower(text))
+
+        def _text_preprocess(text: str) -> str:
+            res = text.lower()
+            res = res.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+            res = re.sub(r"[^\w\s]", " ", res)
+            res = re.sub(r"\s+", " ", res)
+            return res.strip()
+
+        results = Parallel(n_jobs=multiprocessing.cpu_count())(
+            delayed(_text_preprocess)(text)
+            for text in self.data["Комментарий студента"]
         )
+        self.data["text"] = results
 
     def correct_typos(self, text: str) -> str:
         """
@@ -101,31 +95,51 @@ class Preprocess:
                 corrected_words += word + " "
         return corrected_words.strip()
 
-    def remove_stopwords(self, text: str) -> str:
+    def remove_stopwords(self) -> str:
         """
         Принимает на вход текст в нижнем регистре без знаков препинания, возвращает
         текст с удаленными стоп-словами.
         """
-        # Написать перед вызовом функции строчки:
-        # nltk.download('stopwords')
-        # stopwords_set = set(stopwords.words('russian'))
+        stopwords_set = self.stopwords_set
 
-        words = text.split(" ")
-        return " ".join([word for word in words if word not in self.stopwords_set])
+        def _remove_stopwords(l: str, r: str) -> tuple[str, str]:
+            l_words = l.split(" ")
+            r_words = r.split(" ")
+            return (
+                " ".join([word for word in l_words if word not in stopwords_set]),
+                " ".join([word for word in r_words if word not in stopwords_set]),
+            )
 
-    def lemmatize(self, text: str) -> str:
+        results = Parallel(n_jobs=multiprocessing.cpu_count())(
+            delayed(_remove_stopwords)(l, r)
+            for l, r in zip(self.data["text"], self.data["lemmatized_text"])
+        )
+        self.data["text_without_stopwords"] = [l for l, _ in results]
+        self.data["lemmatized_text_without_stopwords"] = [r for _, r in results]
+
+    def lemmatize(self) -> str:
         """
         Принимает на вход текст после препроцессинга, приводит все слова в нем к начальным формам.
         """
-        # Перед вызовом функции нужно объявить morph, написать строчку:
-        # morph = pymorphy3.MorphAnalyzer()
 
-        text = text.split(" ")
-        res = ""
-        for word in text:
-            p = self.morph.parse(word)[0]
-            res += p.normal_form + " "
-        return res.strip()
+        def _lemmatize(text: str) -> str:
+            text = text.split(" ")
+            res = ""
+            for word in text:
+                p = self.morph.parse(word)[0]
+                res += p.normal_form + " "
+            return res.strip()
+
+        # Можно поставить True, но в случае нехватки ресурсов процесс будет убиваться
+        fast: bool = False
+
+        if fast:
+            results = Parallel(n_jobs=multiprocessing.cpu_count())(
+                delayed(_lemmatize)(text) for text in self.data["text"]
+            )
+            self.data["lemmatized_text"] = results
+        else:
+            self.data["lemmatized_text"] = self.data["text"].apply(_lemmatize)
 
     def clean_text(self, text: str) -> str:
         """

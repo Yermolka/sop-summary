@@ -1,3 +1,4 @@
+from typing import Literal
 import pandas as pd
 from transformers import pipeline
 import logging
@@ -20,13 +21,15 @@ class ToneAnalysis:
         else torch.device("cpu"),
     )
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, teacher_name: str | None = None):
         if filename.endswith(".xlsx"):
             self.data = pd.read_excel(filename)
         elif filename.endswith(".csv"):
             self.data = pd.read_csv(filename)
         else:
             raise ValueError("Неверный формат файла")
+
+        self.teacher_name = teacher_name
 
     def tone_analysis(self):
         self.analyze_sentiment()
@@ -47,11 +50,15 @@ class ToneAnalysis:
         print("\nАнализ всех преподавателей:")
         self.analyze_all_teachers_feedback()
 
+        if self.teacher_name:
+            self.analyze_single_teacher_feedback(self.teacher_name)
+            return
+
         print("\nАнализ позитивных отзывов:")
-        self.analyze_positive_feedback()
+        self.analyze_feedback("positive")
 
         print("\nАнализ негативных отзывов:")
-        self.analyze_negative_feedback()
+        self.analyze_feedback("negative")
 
     def analyze_all_teachers_feedback(self):
         """
@@ -118,143 +125,76 @@ class ToneAnalysis:
 
         print("\nПримеры отзывов:")
         display(
-            teacher_df[["Комментарий студента", "sentiment", "emotion"]].sample(
-                3, random_state=42
-            )
+            teacher_df[["Комментарий студента", "sentiment"]].sample(3, random_state=42)
         )
 
-    def analyze_negative_feedback(self, min_reviews=5):
-        """
-        Анализ негативных отзывов для всех преподавателей.
-        """
+    def analyze_feedback(
+        self, sentiment: Literal["positive", "negative"], min_reviews=5
+    ):
         teacher_stats = (
             self.data.groupby("ФИО преподавателя")
             .agg(
                 total_reviews=("sentiment", "count"),
-                negative_reviews=("sentiment", lambda x: (x == "negative").sum()),
+                sentiment_reviews=("sentiment", lambda x: (x == sentiment).sum()),
             )
             .reset_index()
         )
 
         teacher_stats = teacher_stats[teacher_stats["total_reviews"] >= min_reviews]
-        teacher_stats["negative_percent"] = (
-            teacher_stats["negative_reviews"] / teacher_stats["total_reviews"]
+        teacher_stats[f"{sentiment}_percent"] = (
+            teacher_stats["sentiment_reviews"] / teacher_stats["total_reviews"]
         ) * 100
 
         # Топ-10
-        top_negative = teacher_stats.sort_values(
-            "negative_reviews", ascending=False
-        ).head(10)
+        top = teacher_stats.sort_values("sentiment_reviews", ascending=False).head(10)
 
         # визуализация
         plt.figure(figsize=(12, 8))
         plt.barh(
-            top_negative["ФИО преподавателя"],
-            top_negative["negative_reviews"],
+            top["ФИО преподавателя"],
+            top["sentiment_reviews"],
             color="red",
         )
-        plt.title("Топ-10 преподавателей по количеству негативных отзывов")
-        plt.xlabel("Количество негативных отзывов")
+        plt.title(f"Топ-10 преподавателей по количеству {sentiment} отзывов")
+        plt.xlabel(f"Количество {sentiment} отзывов")
         plt.ylabel("Преподаватель")
         plt.gca().invert_yaxis()
         plt.show()
 
-        avg_negative = (
-            self.data["sentiment"].value_counts(normalize=True).get("negative", 0) * 100
+        avg = (
+            self.data["sentiment"].value_counts(normalize=True).get(sentiment, 0) * 100
         )
-        print(
-            f"Средний процент негативных отзывов по всем преподавателям: {avg_negative:.1f}%"
-        )
+        print(f"Средний процент {sentiment} отзывов по всем преподавателям: {avg:.1f}%")
 
         # Детальная таблица
-        teacher_stats["negative_percent"] = teacher_stats["negative_percent"].round(1)
-        teacher_stats = teacher_stats.sort_values("negative_percent", ascending=False)
+        teacher_stats[f"{sentiment}_percent"] = teacher_stats[
+            f"{sentiment}_percent"
+        ].round(1)
+        teacher_stats = teacher_stats.sort_values(
+            f"{sentiment}_percent", ascending=False
+        )
 
-        print("\nДетальная статистика по негативным отзывам:")
+        print(f"\nДетальная статистика по {sentiment} отзывам:")
         display(
             teacher_stats[
                 [
                     "ФИО преподавателя",
                     "total_reviews",
-                    "negative_reviews",
-                    "negative_percent",
+                    "sentiment_reviews",
+                    f"{sentiment}_percent",
                 ]
             ]
         )
 
-        self.all_teachers_stats["Доля негатива (%)"] = (
-            self.all_teachers_stats["negative"]
+        self.all_teachers_stats[f"Доля {sentiment} (%)"] = (
+            self.all_teachers_stats[f"{sentiment}"]
             / self.all_teachers_stats["Всего отзывов"]
             * 100
         ).round(1)
         display(
-            self.all_teachers_stats.sort_values("negative", ascending=False).head(10)
-        )
-
-    def analyze_positive_feedback(self, min_reviews=5):
-        """
-        Анализ позитивных отзывов для всех преподавателей.
-        """
-        teacher_stats = (
-            self.data.groupby("ФИО преподавателя")
-            .agg(
-                total_reviews=("sentiment", "count"),
-                positive_reviews=("sentiment", lambda x: (x == "positive").sum()),
+            self.all_teachers_stats.sort_values(f"{sentiment}", ascending=False).head(
+                10
             )
-            .reset_index()
-        )
-
-        teacher_stats = teacher_stats[teacher_stats["total_reviews"] >= min_reviews]
-        teacher_stats["positive_percent"] = (
-            teacher_stats["positive_reviews"] / teacher_stats["total_reviews"]
-        ) * 100
-
-        top_positive = teacher_stats.sort_values(
-            "positive_reviews", ascending=False
-        ).head(10)
-
-        plt.figure(figsize=(12, 8))
-        plt.barh(
-            top_positive["ФИО преподавателя"],
-            top_positive["positive_reviews"],
-            color="green",
-        )
-        plt.title("Топ-10 преподавателей по количеству позитивных отзывов")
-        plt.xlabel("Количество позитивных отзывов")
-        plt.ylabel("Преподаватель")
-        plt.gca().invert_yaxis()
-        plt.show()
-
-        avg_positive = (
-            self.data["sentiment"].value_counts(normalize=True).get("positive", 0) * 100
-        )
-        print(
-            f"Средний процент позитивных отзывов по всем преподавателям: {avg_positive:.1f}%"
-        )
-
-        teacher_stats["positive_percent"] = teacher_stats["positive_percent"].round(1)
-        teacher_stats = teacher_stats.sort_values("positive_percent", ascending=False)
-
-        print("\nДетальная статистика по позитивным отзывам:")
-        display(
-            teacher_stats[
-                [
-                    "ФИО преподавателя",
-                    "total_reviews",
-                    "positive_reviews",
-                    "positive_percent",
-                ]
-            ]
-        )
-
-        print("\nОбщая статистика с позитивными отзывами:")
-        self.all_teachers_stats["Доля позитива (%)"] = (
-            self.all_teachers_stats["positive"]
-            / self.all_teachers_stats["Всего отзывов"]
-            * 100
-        ).round(1)
-        display(
-            self.all_teachers_stats.sort_values("positive", ascending=False).head(10)
         )
 
     def analyze_sentiment(self, batch_size: int = 100):
