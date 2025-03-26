@@ -1,32 +1,54 @@
+from typing import Literal
 from summary import Summary, SummaryType
-from argparse import ArgumentParser
+from tone_analysis import ToneAnalysis
+from preprocess import Preprocess
+from time import sleep
 
 if __name__ == "__main__":
-    parser = ArgumentParser(
-        usage="python3 __main__.py -f <filename> -o <output> -t -y -c",
-        description="Generate a summary of the data in the file"
-    )
+    # Перед запуском:
+    #    pip install -r requirements.txt
+    #    Поместить файл SOP_report_fio_id.xlsx в папку со скриптом
+    #    Выставить нужные настройки ниже
+    #    python __main__.py ИЛИ python .
 
-    parser.add_argument("-f", "--filename", type=str, default="data.csv", help="Path to the CSV file with the data")
-    parser.add_argument("-o", "--output", type=str, default="summary.csv", help="Path to the output CSV file")
-    parser.add_argument("--threads", type=int, default=4, help="Number of threads to use")
 
-    parser.add_argument("-t", "--teacher", action="store_true", help="Group by teacher")
-    parser.add_argument("-y", "--year", action="store_true", help="Group by year")
-    parser.add_argument("-c", "--course", action="store_true", help="Group by course")
+    # Общие настройки
+    task: Literal["preprocess", "summary", "tone_analysis"] = "preprocess"
+    print("Task: ", task)
+    sleep(2)
 
-    args = parser.parse_args()
+    # Настройки для summary
+    # Модель 0 - cointegrated/rut5-base-absum, быстрая
+    # Модель 1 - IlyaGusev/rut5-base-sum-gazeta, медленная, но более полная и похожая на человеческий язык
+    model_idx: int = 0
 
-    if not any([args.teacher, args.year, args.course]):
-        parser.error("At least one of the following arguments is required: -t, -y, -c")
+    # Группировка по
+    group_by_teacher: bool = True
+    group_by_year: bool = False
+    group_by_course: bool = False
 
-    summary_type = 0
-    if args.teacher:
-        summary_type |= SummaryType.BY_TEACHER
-    if args.year:
-        summary_type |= SummaryType.BY_YEAR
-    if args.course:
-        summary_type |= SummaryType.BY_COURSE
+    match task:
+        case "preprocess":
+            preprocess = Preprocess("SOP_report_fio_id.xlsx")
+            preprocess.preprocess()
+        case "summary":
+            if (
+                not any([group_by_teacher, group_by_year, group_by_course])
+                and task == "summary"
+            ):
+                print("Group by set to default: by teacher")
+                sleep(2)
+                group_by_teacher = True
 
-    summary = Summary(args.filename, summary_type, args.threads, args.output)
-    summary.summarize()
+            summary_type = 0
+            if group_by_teacher:
+                summary_type |= SummaryType.BY_TEACHER
+            if group_by_year:
+                summary_type |= SummaryType.BY_YEAR
+            if group_by_course:
+                summary_type |= SummaryType.BY_COURSE
+            summary = Summary("preprocessed.csv", summary_type, model_idx)
+            summary.summarize()
+        case "tone_analysis":
+            tone_analysis = ToneAnalysis("preprocessed.csv")
+            tone_analysis.tone_analysis()

@@ -1,5 +1,6 @@
 venv/*
 *.csv
+*.xlsx
 __pycache__/*
 *.log
 *.json
