@@ -30,7 +30,7 @@ class Summary:
 
     model_names = [
         "cointegrated/rut5-base-absum",
-        "IlyaGusev/rut5-base-sum-gazeta",
+        "IlyaGusev/rut5_base_sum_gazeta",
     ]
     tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast
     model: T5ForConditionalGeneration
